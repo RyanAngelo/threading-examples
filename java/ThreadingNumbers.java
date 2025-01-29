@@ -13,17 +13,17 @@ import java.util.LinkedList;
 
 public class ThreadingNumbers {
     // Map to store thread random numbers
-    private static final ConcurrentHashMap<Long, Integer> threadNumbers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Integer> threadNumbers = new ConcurrentHashMap<>();
     
     // Semaphore for signaling between threads (binary)
-    private static final Semaphore signal = new Semaphore(0);
+    private final Semaphore signal = new Semaphore(0);
     
     // Lock for console output
-    private static final ReentrantLock consoleLock = new ReentrantLock();
+    private final ReentrantLock consoleLock = new ReentrantLock();
     
     // Condition variable for thread initialization
-    private static final ReentrantLock initLock = new ReentrantLock();
-    private static final Condition threadStarted = initLock.newCondition();
+    private final ReentrantLock initLock = new ReentrantLock();
+    private final Condition threadStarted = initLock.newCondition();
 
     // Thread-safe queue for the thread pool
     static class ThreadSafeQueue {
@@ -72,13 +72,13 @@ public class ThreadingNumbers {
         private final ReentrantLock completionLock = new ReentrantLock();
         private final Condition completionCondition = completionLock.newCondition();
 
-        public ThreadPool(int numThreads) {
+        public ThreadPool(ThreadingNumbers parent, int numThreads) {
             this.taskQueue = new ThreadSafeQueue();
             this.workers = new ArrayList<>();
 
             for (int i = 0; i < numThreads; i++) {
                 Thread worker = new Thread(() -> {
-                    registerThreadNumber();
+                    parent.registerThreadNumber();
                     while (true) {
                         try {
                             Runnable task = taskQueue.pop();
@@ -146,7 +146,7 @@ public class ThreadingNumbers {
     }
 
     // Generate and register a random number for the current thread
-    private static void registerThreadNumber() {
+    private void registerThreadNumber() {
         int randomNum = new Random().nextInt(100) + 1;
         threadNumbers.put(Thread.currentThread().getId(), randomNum);
         initLock.lock();
@@ -158,7 +158,7 @@ public class ThreadingNumbers {
     }
 
     // Wait for a thread to initialize and register its number
-    private static void waitForThreadStart(Thread t) throws InterruptedException {
+    private void waitForThreadStart(Thread t) throws InterruptedException {
         initLock.lock();
         try {
             while (!threadNumbers.containsKey(t.getId())) {
@@ -170,7 +170,7 @@ public class ThreadingNumbers {
     }
 
     // Print a line with thread ID and its random number
-    private static void printLine(String line) {
+    private void printLine(String line) {
         consoleLock.lock();
         try {
             long threadId = Thread.currentThread().getId();
@@ -183,8 +183,13 @@ public class ThreadingNumbers {
     }
 
     public static void main(String[] args) throws InterruptedException {
+        ThreadingNumbers example = new ThreadingNumbers();
+        example.runExample();  // Move main logic to this method
+    }
+
+    private void runExample() throws InterruptedException {
         // Create thread pool with 4 worker threads
-        try (ThreadPool pool = new ThreadPool(4)) {
+        try (ThreadPool pool = new ThreadPool(this, 4)) {
             // Lines from "I'm a Little Teapot"
             List<String> lines = Arrays.asList(
                 "I'm a little teapot",
