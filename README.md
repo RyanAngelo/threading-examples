@@ -1,4 +1,4 @@
-# cpp-threading
+# Threading Examples
 Threading Examples in C++ and Java
 
 This project demonstrates various threading concepts including mutexes, semaphores, and thread pools.
