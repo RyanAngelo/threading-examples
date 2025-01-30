@@ -21,6 +21,14 @@ namespace detail {  // Hide implementation details
     std::binary_semaphore signal_semaphore{0};
 }
 
+/**
+ * Internal implementation details.
+ * Not intended for direct use by clients.
+ */
+namespace detail {
+    // ...
+}
+
 // Function to generate a random number
 int generate_random_number() {
     static thread_local std::random_device rd;
@@ -37,7 +45,7 @@ void register_thread_number() {
         std::lock_guard<std::mutex> lock(detail::thread_numbers_mutex);
         detail::thread_numbers[thread_id] = random_num;
     }
-    thread_started_cv.notify_all();
+    detail::thread_started_cv.notify_all();
 }
 
 /**
@@ -76,12 +84,13 @@ public:
 
 /**
  * Thread pool for executing tasks in parallel.
- * @thread-safety All public methods are thread-safe
- * @exception-safety Strong guarantee for enqueue operations
- * @invariant Workers are always joined in destructor
+ * Thread safety: All public methods are thread-safe.
+ * Exception safety: Strong guarantee for enqueue operations.
+ * Resource management: All threads are properly joined in destructor.
  */
 class ThreadPool {
 private:
+    static constexpr auto SHUTDOWN_TASK = nullptr;
     std::vector<std::thread> workers;
     ThreadSafeQueue task_queue;
     bool stop;
@@ -99,17 +108,27 @@ public:
         , completion_cv()
     {
         for(size_t i = 0; i < num_threads; ++i) {
-            workers.emplace_back([this, &register_thread_number] {
+            workers.emplace_back([this] {
                 register_thread_number();
                 while(true) {
-                    auto task = task_queue.pop();
-                    if(stop && task == nullptr) break;
-                    
-                    if (task) {
-                        active_tasks++;
-                        task();
-                        active_tasks--;
-                        completion_cv.notify_all();
+                    try {
+                        auto task = task_queue.pop();
+                        if(stop && task == SHUTDOWN_TASK) break;
+                        
+                        if (task) {
+                            active_tasks++;
+                            try {
+                                task();
+                            } catch (...) {
+                                // Log error but continue processing
+                                std::cerr << "Task execution failed\n";
+                            }
+                            active_tasks--;
+                            completion_cv.notify_all();
+                        }
+                    } catch (const std::runtime_error& e) {
+                        if (!stop) std::cerr << "Queue error: " << e.what() << "\n";
+                        break;
                     }
                 }
             });
@@ -118,9 +137,9 @@ public:
 
     ~ThreadPool() noexcept {
         stop = true;
-        // Push empty tasks to unblock threads
+        // Push shutdown tasks to unblock threads
         for(size_t i = 0; i < workers.size(); ++i) {
-            task_queue.push(nullptr);
+            task_queue.push(SHUTDOWN_TASK);
         }
         for(auto& worker : workers) {
             worker.join();
@@ -146,8 +165,12 @@ public:
     }
 
     // Get the number of worker threads
-    size_t worker_count() const noexcept {
+    [[nodiscard]] size_t worker_count() const noexcept {
         return workers.size();
+    }
+
+    [[nodiscard]] bool is_empty() const noexcept {
+        return task_queue.empty();
     }
 };
 
@@ -166,7 +189,7 @@ void print_line(std::string_view line) {
 // Function to wait for thread initialization
 void wait_for_thread_start(const std::thread& t) {
     std::unique_lock<std::mutex> lock(detail::thread_numbers_mutex);
-    thread_started_cv.wait(lock, [&t] {
+    detail::thread_started_cv.wait(lock, [&t] {
         return detail::thread_numbers.find(t.get_id()) != detail::thread_numbers.end();
     });
 }
@@ -185,7 +208,7 @@ public:
 // Move main outside the namespace
 int main() {
     // Create thread pool with 4 worker threads
-    threading::ThreadPool pool(4);  // Use namespace prefix
+    threading::ThreadPool pool(4);
 
     // Lines from "I'm a Little Teapot"
     std::vector<std::string> lines = {
@@ -201,31 +224,27 @@ int main() {
 
     // Demonstrate mutex usage - print first two lines
     std::thread t1([&]{ 
-        threading::register_thread_number();  // Use namespace prefix
-        threading::print_line(lines[0]);      // Use namespace prefix
+        threading::register_thread_number();
+        threading::print_line(lines[0]); 
     });
-    ThreadGuard g1(t1);  // Ensures join happens even if exception thrown
+    threading::ThreadGuard g1(t1);  // Use RAII for thread joining
+    
     std::thread t2([&]{ 
         threading::register_thread_number();
         threading::print_line(lines[1]); 
     });
+    threading::ThreadGuard g2(t2);
     
-    // Wait for threads to register their numbers and complete
-    threading::wait_for_thread_start(t1);
-    threading::wait_for_thread_start(t2);
-    t1.join();
-    t2.join();
-
     // Demonstrate semaphore usage - print next two lines
     std::thread producer([&]{
         threading::register_thread_number();
         threading::print_line(lines[2]);
-        detail::signal_semaphore.release(); // Signal consumer
+        threading::detail::signal_semaphore.release(); // Signal consumer
     });
 
     std::thread consumer([&]{
         threading::register_thread_number();
-        detail::signal_semaphore.acquire(); // Wait for producer
+        threading::detail::signal_semaphore.acquire(); // Wait for producer
         threading::print_line(lines[3]);
     });
 
@@ -237,17 +256,17 @@ int main() {
 
     // Wait for all thread pool workers to initialize
     {
-        std::unique_lock<std::mutex> lock(detail::thread_numbers_mutex);
-        thread_started_cv.wait(lock, [&pool] {
-            return detail::thread_numbers.size() >= pool.worker_count();
+        std::unique_lock<std::mutex> lock(threading::detail::thread_numbers_mutex);
+            threading::detail::thread_started_cv.wait(lock, [&pool] {
+            return threading::detail::thread_numbers.size() >= pool.worker_count();
         });
     }
 
     // Print all thread pool worker numbers
     {
-        std::lock_guard<std::mutex> lock(detail::console_mutex);
+        std::lock_guard<std::mutex> lock(threading::detail::console_mutex);
         std::cout << "\nThread pool worker random numbers:\n";
-        for (const auto& [thread_id, number] : detail::thread_numbers) {
+        for (const auto& [thread_id, number] : threading::detail::thread_numbers) {
             std::cout << "Worker thread " << thread_id << ": " << number << std::endl;
         }
         std::cout << std::endl;

@@ -84,3 +84,26 @@ buildNumber.properties
 # Gradle
 .gradle/
 build/
+
+# Build output directory
+out/
+
+# Rust specific
+debug/
+target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# Compiled files
+*.class
+*.o
+*.exe
+
+# Remove if creating a library
+# Cargo.lock

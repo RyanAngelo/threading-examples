@@ -67,46 +67,42 @@ Each version demonstrates:
 
 ### C++ Examples
 ```bash
+# Create output directory
+mkdir -p out
+
 # Basic threading example
-g++ -std=c++20 cpp/threading.cpp -o threading -pthread
-./threading
+g++ -std=c++20 cpp/threading.cpp -o out/threading -pthread
+./out/threading
 
 # Threading with random numbers
-g++ -std=c++20 cpp/threading_numbers.cpp -o threading_numbers -pthread
-./threading_numbers
+g++ -std=c++20 cpp/threading_numbers.cpp -o out/threading_numbers -pthread -I.
+./out/threading_numbers
 ```
 
 ### Java Examples
 ```bash
+# Create output directory
+mkdir -p out/java
+
 # Basic threading example
-javac java/ThreadingExample.java
-java -cp java ThreadingExample
+javac -d out/java java/ThreadingExample.java
+java -cp out/java ThreadingExample
 
 # Threading with random numbers
-javac java/ThreadingNumbers.java
-java -cp java ThreadingNumbers
+javac -d out/java java/ThreadingNumbers.java
+java -cp out/java ThreadingNumbers
 ```
 
 ### Rust Examples
 ```bash
+# Create output directory
+mkdir -p out/rust
+
 # Basic threading example
-rustc rust/threading.rs
-./threading
+rustc rust/threading.rs -o out/rust/threading
+./out/rust/threading
 
 # Threading with random numbers
-rustc rust/threading_numbers.rs
-./threading_numbers
+rustc rust/threading_numbers.rs -o out/rust/threading_numbers
+./out/rust/threading_numbers
 ```
-
-## Output
-
-All versions demonstrate threading concepts by printing the lines of "I'm a Little Teapot" using different threading mechanisms:
-1. Basic thread synchronization with mutex/locks
-2. Producer-consumer pattern using semaphores/channels
-3. Parallel task execution using a thread pool
-
-The random numbers versions additionally show:
-- Random numbers generated for each thread
-- Thread IDs with their associated random numbers
-- Summary of thread pool worker random numbers
-
