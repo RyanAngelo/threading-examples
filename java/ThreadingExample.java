@@ -3,15 +3,21 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ThreadingExample {
-    // Instance fields instead of static
     private final Object consoleLock = new Object();
     private final Semaphore signalSemaphore = new Semaphore(0);
     
     // Thread-safe queue implementation using BlockingQueue
-    static class ThreadSafeQueue {
-        private final BlockingQueue<Runnable> tasks = new LinkedBlockingQueue<>();
+    class ThreadSafeQueue {
+        private final BlockingQueue<Runnable> tasks;
+        
+        public ThreadSafeQueue() {
+            this.tasks = new LinkedBlockingQueue<>();
+        }
         
         public void push(Runnable task) {
+            if (task == null) {
+                throw new NullPointerException("Task cannot be null");
+            }
             tasks.offer(task);
         }
         
@@ -25,30 +31,41 @@ public class ThreadingExample {
     }
     
     // Thread pool implementation
-    static class ThreadPool {
+    class ThreadPool implements AutoCloseable {
+        private static final AtomicInteger threadCounter = new AtomicInteger(0);
+        
+        // Add a sentinel task for shutdown
+        private static final Runnable SHUTDOWN_TASK = () -> {};
+        
         private final Vector<Thread> workers;
         private final ThreadSafeQueue taskQueue;
         private volatile boolean stop = false;
         private final AtomicInteger activeTasks = new AtomicInteger(0);
         private final Object completionLock = new Object();
         
-        public ThreadPool(int numThreads) {
+        public ThreadPool(ThreadingExample parent, int numThreads) {
+            if (numThreads <= 0) {
+                throw new IllegalArgumentException("Number of threads must be positive");
+            }
             this.workers = new Vector<>();
             this.taskQueue = new ThreadSafeQueue();
             
             for (int i = 0; i < numThreads; i++) {
-                workers.add(new Thread(() -> {
+                Thread worker = new Thread(() -> {
                     while (true) {
                         try {
                             Runnable task = taskQueue.pop();
-                            if (stop && task == null) break;
+                            if (stop && task == SHUTDOWN_TASK) break;
                             
-                            if (task != null) {
+                            if (task != null && task != SHUTDOWN_TASK) {
                                 activeTasks.incrementAndGet();
-                                task.run();
-                                activeTasks.decrementAndGet();
-                                synchronized (completionLock) {
-                                    completionLock.notifyAll();
+                                try {
+                                    task.run();
+                                } finally {
+                                    activeTasks.decrementAndGet();
+                                    synchronized (completionLock) {
+                                        completionLock.notifyAll();
+                                    }
                                 }
                             }
                         } catch (InterruptedException e) {
@@ -56,12 +73,19 @@ public class ThreadingExample {
                             break;
                         }
                     }
-                }));
-                workers.lastElement().start();
+                }, "ThreadPool-Worker-" + threadCounter.incrementAndGet());
+                workers.add(worker);
+                worker.start();
             }
         }
         
         public void enqueue(Runnable task) {
+            if (task == null) {
+                throw new NullPointerException("Task cannot be null");
+            }
+            if (stop) {
+                throw new IllegalStateException("ThreadPool is shutting down");
+            }
             taskQueue.push(task);
         }
         
@@ -74,21 +98,47 @@ public class ThreadingExample {
         }
         
         public void shutdown() {
+            // First set stop flag
             stop = true;
-            workers.forEach(worker -> taskQueue.push(null));
-            workers.forEach(worker -> {
+            
+            // Then wait for active tasks to complete
+            synchronized (completionLock) {
+                while (activeTasks.get() > 0) {
+                    try {
+                        completionLock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+
+            // Now push shutdown tasks to stop workers
+            for (int i = 0; i < workers.size(); i++) {
+                taskQueue.push(SHUTDOWN_TASK);
+            }
+
+            // Finally join all worker threads
+            for (Thread worker : workers) {
                 try {
                     worker.join();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-            });
+            }
+        }
+        
+        @Override
+        public void close() {
+            shutdown();
         }
     }
     
-    // Make this an instance method
+    // Simplify method
     private void printLine(String line) {
-        synchronized (consoleLock) {
+        if (line == null) {
+            throw new NullPointerException("Line cannot be null");
+        }
+        synchronized(consoleLock) {
             System.out.println("Thread " + Thread.currentThread().getName() + ": " + line);
         }
     }
@@ -96,58 +146,56 @@ public class ThreadingExample {
     // Make this an instance method
     public void runExample() throws InterruptedException {
         // Create thread pool with 4 worker threads
-        ThreadPool pool = new ThreadPool(4);
-        
-        // Lines from "I'm a Little Teapot"
-        String[] lines = {
-            "I'm a little teapot",
-            "Short and stout",
-            "Here is my handle",
-            "Here is my spout",
-            "When I get all steamed up",
-            "Hear me shout",
-            "Tip me over",
-            "And pour me out!"
-        };
-        
-        // Demonstrate mutex usage - print first two lines
-        Thread t1 = new Thread(() -> printLine(lines[0]));
-        Thread t2 = new Thread(() -> printLine(lines[1]));
-        
-        t1.start();
-        t2.start();
-        t1.join();
-        t2.join();
-        
-        // Demonstrate semaphore usage - print next two lines
-        Thread producer = new Thread(() -> {
-            printLine(lines[2]);
-            signalSemaphore.release(); // Signal consumer
-        });
-        
-        Thread consumer = new Thread(() -> {
-            try {
-                signalSemaphore.acquire(); // Wait for producer
-                printLine(lines[3]);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        try (ThreadPool pool = new ThreadPool(this, 4)) {
+            // Lines from "I'm a Little Teapot"
+            String[] lines = {
+                "I'm a little teapot",
+                "Short and stout",
+                "Here is my handle",
+                "Here is my spout",
+                "When I get all steamed up",
+                "Hear me shout",
+                "Tip me over",
+                "And pour me out!"
+            };
+            
+            // Demonstrate mutex usage - print first two lines
+            Thread t1 = new Thread(() -> printLine(lines[0]));
+            Thread t2 = new Thread(() -> printLine(lines[1]));
+            
+            t1.start();
+            t2.start();
+            t1.join();
+            t2.join();
+            
+            // Demonstrate semaphore usage - print next two lines
+            Thread producer = new Thread(() -> {
+                printLine(lines[2]);
+                signalSemaphore.release(); // Signal consumer
+            });
+            
+            Thread consumer = new Thread(() -> {
+                try {
+                    signalSemaphore.acquire(); // Wait for producer
+                    printLine(lines[3]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            
+            producer.start();
+            consumer.start();
+            producer.join();
+            consumer.join();
+            
+            // Demonstrate thread pool - print remaining lines
+            for (int i = 4; i < lines.length; i++) {
+                final String line = lines[i];
+                pool.enqueue(() -> printLine(line));
             }
-        });
-        
-        producer.start();
-        consumer.start();
-        producer.join();
-        consumer.join();
-        
-        // Demonstrate thread pool - print remaining lines
-        for (int i = 4; i < lines.length; i++) {
-            final String line = lines[i];
-            pool.enqueue(() -> printLine(line));
+            // Wait for all thread pool tasks to complete
+            pool.waitForCompletion();
         }
-        
-        // Wait for all thread pool tasks to complete
-        pool.waitForCompletion();
-        pool.shutdown();
     }
     
     // Keep main method static, but create an instance to run the example

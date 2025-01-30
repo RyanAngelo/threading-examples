@@ -26,7 +26,7 @@ public class ThreadingNumbers {
     private final Condition threadStarted = initLock.newCondition();
 
     // Thread-safe queue for the thread pool
-    static class ThreadSafeQueue {
+    class ThreadSafeQueue {
         private final Queue<Runnable> tasks = new LinkedList<>();
         private final ReentrantLock lock = new ReentrantLock();
         private final Condition notEmpty = lock.newCondition();
@@ -64,7 +64,7 @@ public class ThreadingNumbers {
     }
 
     // Thread pool implementation
-    static class ThreadPool implements AutoCloseable {
+    class ThreadPool implements AutoCloseable {
         private final List<Thread> workers;
         private final ThreadSafeQueue taskQueue;
         private volatile boolean stop = false;
@@ -73,7 +73,7 @@ public class ThreadingNumbers {
         private final Condition completionCondition = completionLock.newCondition();
 
         public ThreadPool(ThreadingNumbers parent, int numThreads) {
-            this.taskQueue = new ThreadSafeQueue();
+            this.taskQueue = parent.new ThreadSafeQueue();
             this.workers = new ArrayList<>();
 
             for (int i = 0; i < numThreads; i++) {
@@ -174,7 +174,12 @@ public class ThreadingNumbers {
         consoleLock.lock();
         try {
             long threadId = Thread.currentThread().getId();
-            int randomNum = threadNumbers.get(threadId);
+            Integer randomNum = threadNumbers.get(threadId);
+            if (randomNum == null) {
+                // Register number if thread hasn't done so yet
+                registerThreadNumber();
+                randomNum = threadNumbers.get(threadId);
+            }
             System.out.printf("Thread %d (random number: %d): %s%n", 
                             threadId, randomNum, line);
         } finally {
@@ -182,10 +187,6 @@ public class ThreadingNumbers {
         }
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        ThreadingNumbers example = new ThreadingNumbers();
-        example.runExample();  // Move main logic to this method
-    }
 
     private void runExample() throws InterruptedException {
         // Create thread pool with 4 worker threads
@@ -276,4 +277,9 @@ public class ThreadingNumbers {
             pool.waitForCompletion();
         }
     }
-} 
+
+    public static void main(String[] args) throws InterruptedException {
+        ThreadingNumbers example = new ThreadingNumbers();
+        example.runExample();  // Move main logic to this method
+    }
+}
